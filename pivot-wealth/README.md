@@ -7,23 +7,22 @@ One form script serves both pages (it detects which one it is on):
 | High-income (hinry) | `/high-income/vsl` |
 | Business owner | `/business/vsl` |
 
-## Files (served from `https://website-codes.vercel.app/pivot-wealth/`)
+## Files (served from `https://website-codes-sigma.vercel.app/pivot-wealth/`)
 
 | File | What it is |
 |---|---|
 | `vsl.js` / `vsl.min.js` | the form script (readable / minified, identical behaviour). Edit `vsl.js`, regenerate the min file |
 | `popup.js` / `popup.min.js` | modal vs inline placement of the form (A/B variant via the `vsl:form-inline` event) |
-| `vsl-styles.css` | the CSS the form needs (selected option, autofill, date chips, modal) |
 
 ## Add to each page (Webflow, before `</body>`)
 
 ```html
-<link rel="stylesheet" href="https://website-codes.vercel.app/pivot-wealth/vsl-styles.css">
-<script src="https://website-codes.vercel.app/pivot-wealth/vsl.min.js"></script>
-<script src="https://website-codes.vercel.app/pivot-wealth/popup.min.js"></script>
+<script src="https://website-codes-sigma.vercel.app/pivot-wealth/vsl.min.js"></script>
+<script src="https://website-codes-sigma.vercel.app/pivot-wealth/popup.min.js"></script>
 ```
 
 Use `vsl.js` / `popup.js` instead of the `.min` files when debugging.
+The form CSS is not hosted here; it is a style embed on the Webflow pages.
 
 ## Config
 
