@@ -1,0 +1,46 @@
+/* Pivot Wealth VSL form styles (both pages). */
+/* selected option: solid orange pill (matches the design) */
+.vsl-step-radio.is-selected,
+.vsl-qf-radio.is-selected {
+  background-color: #f57645 !important;
+  border-color: #f57645 !important;
+  color: #fff !important;
+}
+.vsl-step-radio .w-form-label,
+.vsl-qf-radio .w-form-label {
+  font-weight: 500;
+  line-height: normal;
+}
+.vsl-step-radio.is-selected .w-form-label,
+.vsl-qf-radio.is-selected .w-form-label {
+  font-weight: 600;
+}
+
+/* fallbacks (zero specificity, so any Designer style wins) */
+:where(.vsl-qf-radio.is-selected) { border-color: #f57645; background-color: rgba(255, 255, 255, 0.08); }
+:where(.vsl-qf-input.is-invalid) { border-color: #e5484d; }
+:where(.vsl-qf-slot) { cursor: pointer; }
+:where(.vsl-qf-btn) { cursor: pointer; }
+:where(.iti) { width: 100%; }
+:where(.vsl-qf-input[readonly], .vsl-qf-input:disabled) { opacity: 0.6; cursor: default; }
+
+/* date chips stay on one line */
+[vsl-slot="date-template"],
+[vsl-slot="date-list"] > * { white-space: nowrap; }
+
+/* browser autofill: keep the transparent field instead of a yellow/white fill */
+.vsl-qf-input:-webkit-autofill,
+.vsl-qf-input:-webkit-autofill:hover,
+.vsl-qf-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff !important;
+  caret-color: #fff;
+  transition: background-color 9999s ease-in-out 0s, color 9999s ease-in-out 0s;
+}
+
+/* only used when CONFIRMED_VIDEO is 'mobile' (video group hidden above 991px) */
+@media (min-width: 992px) { .vsl-mobile-only { display: none !important; } }
+
+/* popup (modal) variant, also set by the popup code: the hero form block is hidden on desktop until the form
+   is needed, and the form card is solid inside the modal */
+@media (min-width: 768px) { [vsl-inline-form], [vsl-ancor], .vsl-ancor { display: none; } }
+[vsl-form-modal] .vsl-qf-wrap { background-color: #102b4b; }
