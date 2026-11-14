@@ -1,5 +1,6 @@
-window.CrownForm = window.CrownForm || {
-  forms: [], type: null,
+
+
+ window.CrownForm = Object.assign(window.CrownForm || { forms: [], type: null }, {
   show: function (type) {
     type = String(type).replace('-form', '');
     document.querySelectorAll('[data-form-wrapper] [data-form="long-form"], [data-form-wrapper] [data-form="short-form"]').forEach(function (el) {
@@ -13,7 +14,322 @@ window.CrownForm = window.CrownForm || {
     this.type = null;
     document.dispatchEvent(new CustomEvent('crownform:shown', { detail: { type: null } }));
   }
-};
+});
+
+if (!window.CrownForm.heroBound) {
+  window.CrownForm.heroBound = true;
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href="#open-form"]');
+    if (!a) return;
+    e.preventDefault();
+    var wrap = document.querySelector('[data-form-wrapper="hero"]');
+    if (!wrap) return;
+    var media = document.querySelector('[data-hero="media"]');
+    var cta = document.querySelector('[data-hero="cta"]');
+    var after = document.querySelector('[data-hero="after"]');
+    if (media) media.classList.add('hide');
+    if (cta) cta.classList.add('hide');
+    if (after) after.classList.remove('hide');
+    wrap.classList.add('is-active');
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+}
+
+(function () {
+  window.CrownForm = window.CrownForm || { forms: [], type: null };
+  if (window.CrownForm.suburb) return;
+  var PC_URL = 'https://flowdojo.github.io/au-postcodes/au-postcodes.json';
+  var cf = window.CrownForm;
+
+  function load() {
+    if (!cf.pcPromise) {
+      cf.pcPromise = fetch(PC_URL).then(function (r) { return r.json(); }).then(function (d) {
+        var rows = [];
+        Object.keys(d).forEach(function (pc) { d[pc].forEach(function (e) { rows.push({ suburb: e[0], state: e[1], pc: pc, lower: e[0].toLowerCase() }); }); });
+        return rows;
+      }).catch(function () { cf.pcPromise = null; return null; });
+    }
+    return cf.pcPromise;
+  }
+
+  function search(rows, text) {
+    var t = text.trim().toLowerCase(), stF = null, pcF = null, m;
+    if (t.length < 2) return [];
+    if (/^\d{1,4}$/.test(t)) {
+      return rows.filter(function (r) { return r.pc.indexOf(t) === 0; }).slice(0, 8);
+    }
+    m = t.match(/^(.*?)\s+(nsw|vic|qld|sa|wa|tas|nt|act|\d{4})$/);
+    if (m) { t = m[1]; if (/^\d{4}$/.test(m[2])) pcF = m[2]; else stF = m[2].toUpperCase(); }
+    var starts = [], inside = [];
+    rows.forEach(function (r) {
+      if (stF && r.state !== stF) return;
+      if (pcF && r.pc !== pcF) return;
+      var i = r.lower.indexOf(t);
+      if (i === 0) starts.push(r); else if (i > 0) inside.push(r);
+    });
+    function by(a, b) { return a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : (a.state + a.pc) < (b.state + b.pc) ? -1 : 1; }
+    starts.sort(by); inside.sort(by);
+    return starts.concat(inside).slice(0, 8);
+  }
+
+  function attach(cfg) {
+    var input = cfg.input, list = cfg.list, tpl = cfg.tpl, chip = cfg.chip, chipText = cfg.chipText;
+    var hits = [], active = -1;
+    function qa(sel, root) { return [].slice.call(root.querySelectorAll(sel)); }
+    function setChip(h) {
+      if (!chip) return;
+      if (h) { if (chipText) chipText.textContent = h.state + ' ' + h.pc; chip.style.display = ''; }
+      else chip.style.display = 'none';
+    }
+    function closeList() { hits = []; active = -1; if (list) list.style.display = 'none'; }
+    function paintActive() {
+      qa('[data-suggest="row"]', list).forEach(function (el, i) { el.style.backgroundColor = i === active ? '#f7f1fc' : ''; });
+    }
+    function choose(h) {
+      if (input) input.value = h ? h.suburb : '';
+      cfg.hidden('Suburb-State').value = h ? h.state : '';
+      cfg.hidden('Suburb-Postcode').value = h ? h.pc : '';
+      setChip(h); closeList(); cfg.pick(h);
+    }
+    function openList(rows) {
+      if (!list || !tpl) return;
+      qa('[data-suggest="row"]', list).forEach(function (el) { el.parentNode.removeChild(el); });
+      hits = rows; active = -1;
+      if (!rows.length) { list.style.display = 'none'; return; }
+      tpl.style.display = 'none';
+      rows.forEach(function (h, i) {
+        var el = tpl.cloneNode(true);
+        el.setAttribute('data-suggest', 'row'); el.style.display = '';
+        el.children[0].textContent = h.suburb; el.children[1].textContent = h.state + ' ' + h.pc;
+        el.addEventListener('mousedown', function (e) { e.preventDefault(); choose(h); });
+        el.addEventListener('mouseenter', function () { active = i; paintActive(); });
+        list.appendChild(el);
+      });
+      list.style.display = 'block';
+    }
+    function restore(data) {
+      if (!input || !data || !data['Suburb-State']) return;
+      var h = { suburb: input.value, state: data['Suburb-State'], pc: data['Suburb-Postcode'] };
+      cfg.pick(h, true); setChip(h);
+    }
+    if (input && list) {
+      if (tpl) tpl.style.display = 'none';
+      setChip(null); closeList();
+      input.addEventListener('focus', function () { load(); });
+      input.addEventListener('input', function () {
+        cfg.pick(null, true); setChip(null); cfg.clear();
+        cfg.hidden('Suburb-State').value = ''; cfg.hidden('Suburb-Postcode').value = '';
+        var text = input.value;
+        load().then(function (rows) {
+          if (!rows || input.value !== text) return;
+          var found = search(rows, text);
+          if (found.length === 1 && found[0].lower === text.trim().toLowerCase()) choose(found[0]); else openList(found);
+        });
+      });
+      input.addEventListener('keydown', function (e) {
+        if (!hits.length) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % hits.length; paintActive(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + hits.length) % hits.length; paintActive(); }
+        else if (e.key === 'Enter' && active > -1) { e.preventDefault(); choose(hits[active]); }
+        else if (e.key === 'Escape') closeList();
+      });
+      input.addEventListener('blur', function () { setTimeout(closeList, 150); });
+    }
+    return { choose: choose, restore: restore };
+  }
+
+  cf.suburb = { load: load, search: search, attach: attach };
+})();
+
+(function () {
+  window.CrownForm = window.CrownForm || { forms: [], type: null };
+  if (window.CrownForm.build) return;
+  var CHECK_SVG = '<svg viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"></path></svg>';
+  var DOT_SVG = '<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="1.5" fill="currentColor"></circle></svg>';
+
+  function create(cfg) {
+    var checks = cfg.checks, rows = checks ? [].slice.call(checks.children) : [];
+    var timer = null, paintKey = '', chipProto = null;
+    rows.forEach(function (r) { if (!chipProto && r.children[2]) chipProto = r.children[2]; });
+
+    function chipFor(row) {
+      var c = row.children[2];
+      if (!c && chipProto) { c = chipProto.cloneNode(true); c.removeAttribute('data-bind'); row.appendChild(c); }
+      return c;
+    }
+    function paint(pct) {
+      var done = Math.floor(pct / 20), d = cfg.data();
+      var key = done + '|' + (pct >= 100) + '|' + d.key;
+      if (key !== paintKey) {
+        paintKey = key;
+        rows.forEach(function (row, i) {
+          var state = i < done ? 'done' : (i === done && pct < 100) ? 'active' : 'pending';
+          var tick = row.children[0], text = row.children[1], chip = chipFor(row);
+          tick.className = 'google-lp-form-tick' + (state === 'done' ? ' is-done' : state === 'active' ? ' is-active' : ' is-pending');
+          tick.innerHTML = state === 'done' ? CHECK_SVG : state === 'pending' ? DOT_SVG : '';
+          text.className = 'google-lp-form-check-text' + (state === 'pending' ? ' is-pending' : '');
+          if (chip) { chip.style.display = state === 'done' ? '' : 'none'; if (state === 'done') chip.textContent = d.chips[i]; }
+        });
+        if (cfg.title) cfg.title.textContent = pct >= 100 ? 'Your payoff plan is ready' : 'Building your payoff plan…';
+        if (cfg.ready) cfg.ready.style.display = pct >= 100 ? 'flex' : 'none';
+      }
+      cfg.pct(pct);
+      if (cfg.meter) cfg.meter.style.paddingLeft = pct + '%';
+    }
+    function stop() { if (timer) cancelAnimationFrame(timer); timer = null; }
+    function start() {
+      if (!checks) { cfg.state(true); return; }
+      stop(); cfg.state(false); paintKey = ''; paint(0);
+      var t0 = performance.now(), dur = 4200;
+      function ease(t) { return t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
+      function frame(now) {
+        var t = Math.min(1, (now - t0) / dur), p = t >= 1 ? 100 : ease(t) * 100;
+        paint(p);
+        if (t >= 1) { timer = null; cfg.state(true); return; }
+        timer = requestAnimationFrame(frame);
+      }
+      timer = requestAnimationFrame(frame);
+    }
+    return { start: start, stop: stop };
+  }
+
+  window.CrownForm.build = { create: create };
+})();
+
+(function () {
+  if (window.CrownEvidenceInline) return; window.CrownEvidenceInline = true;
+
+  function secs(t) {
+    var m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/.exec(String(t || '').trim());
+    return m ? (parseInt(m[1], 10) || 0) * 3600 + (parseInt(m[2], 10) || 0) * 60 + (parseInt(m[3], 10) || 0) : 0;
+  }
+  function parseVideo(src) {
+    try {
+      var u = new URL(src, location.href), id = '';
+      if (/youtu\.be$/.test(u.hostname)) id = u.pathname.slice(1);
+      else if (/\/embed\//.test(u.pathname)) id = u.pathname.split('/embed/')[1];
+      else id = u.searchParams.get('v') || '';
+      return { id: id.split(/[/?&]/)[0], start: secs(u.searchParams.get('t') || u.searchParams.get('start')) };
+    } catch (e) { return { id: '', start: 0 }; }
+  }
+  function stopInline(el) {
+    try { if (el.tagName === 'VIDEO') { el.pause(); el.removeAttribute('src'); el.load(); } } catch (err) {}
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }
+  function playInline(trig) {
+    var src = trig.getAttribute('data-video-src'); if (!src) return;
+    var host = trig.querySelector('[data-video-media]') || trig;
+    if (host.querySelector('[data-video-player]')) return;
+    [].slice.call(document.querySelectorAll('[data-video-player]')).forEach(stopInline);
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    var el, fill = 'position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;background:#000;border-radius:inherit;z-index:20;';
+    if (/\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(src)) {
+      el = document.createElement('video');
+      el.src = src; el.controls = true; el.autoplay = true; el.playsInline = true; el.preload = 'auto';
+      el.style.cssText = fill + 'object-fit:contain;';
+      el.addEventListener('ended', function () { stopInline(el); });
+    } else {
+      var v = parseVideo(src); if (!v.id) return;
+      el = document.createElement('iframe');
+      el.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(v.id) + '?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&cc_load_policy=0&enablejsapi=1&origin=' + encodeURIComponent(location.origin) + (v.start ? '&start=' + v.start : '');
+      el.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+      el.setAttribute('allowfullscreen', '');
+      el.title = 'Video';
+      el.style.cssText = fill + 'border:0;';
+      el.addEventListener('load', function () { try { el.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*'); } catch (e) {} });
+    }
+    el.setAttribute('data-video-player', '');
+    host.appendChild(el);
+    if (el.play) { var p = el.play(); if (p && p.catch) p.catch(function () {}); }
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target; if (!t || !t.closest) return;
+    if (t.closest('[data-video-player]')) return;
+    var trig = t.closest('[data-video-src][data-video-mode="inline"]');
+    if (trig) { e.preventDefault(); playInline(trig); }
+  });
+  window.addEventListener('message', function (e) {
+    if (!e.origin || e.origin.indexOf('youtube') < 0) return;
+    var d = e.data; if (typeof d === 'string') { try { d = JSON.parse(d); } catch (err) { return; } }
+    if (d && d.event === 'onStateChange' && d.info === 0) [].slice.call(document.querySelectorAll('iframe[data-video-player]')).forEach(stopInline);
+  });
+})();
+
+(function () {
+  if (window.CrownVideoPopup) return; window.CrownVideoPopup = true;
+  var lastFocus = null;
+        function modal() { return document.querySelector('[data-video-modal]'); }
+        function secs(t) {
+          var m = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$/.exec(String(t || '').trim());
+          return m ? (parseInt(m[1], 10) || 0) * 3600 + (parseInt(m[2], 10) || 0) * 60 + (parseInt(m[3], 10) || 0) : 0;
+        }
+        function parseVideo(src) {
+          try {
+            var u = new URL(src, location.href), id = '';
+            if (/youtu\.be$/.test(u.hostname)) id = u.pathname.slice(1);
+            else if (/\/embed\//.test(u.pathname)) id = u.pathname.split('/embed/')[1];
+            else id = u.searchParams.get('v') || '';
+            return { id: id.split(/[/?&]/)[0], start: secs(u.searchParams.get('t') || u.searchParams.get('start')) };
+          } catch (e) { return { id: '', start: 0 }; }
+        }
+        function openVideo(src) {
+          var m = modal(); if (!m) return;
+          var frame = m.querySelector('[data-video="frame"]');
+          var isFile = /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(String(src || ''));
+          var v = isFile ? { id: '', start: 0 } : parseVideo(src), id = v.id, start = v.start;
+          if (!frame || (!id && !isFile)) return;
+          frame.innerHTML = '';
+          var f;
+          if (isFile) {
+            f = document.createElement('video');
+            f.src = src; f.controls = true; f.autoplay = true; f.playsInline = true;
+            f.style.cssText = 'display:block;width:100%;height:100%;background:#000;';
+            frame.appendChild(f);
+            m.classList.add('is-open'); document.body.style.overflow = 'hidden'; lastFocus = document.activeElement;
+            var cb = m.querySelector('[data-video="close"]'); if (cb) cb.focus();
+            return;
+          }
+          f = document.createElement('iframe');
+
+          f.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(id) + '?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1&cc_load_policy=0&disablekb=1&enablejsapi=1&origin=' + encodeURIComponent(location.origin) + (start ? '&start=' + start : '');
+          f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+          f.setAttribute('allowfullscreen', '');
+          f.title = m.getAttribute('aria-label') || 'Video';
+          f.style.cssText = 'display:block;width:100%;height:100%;border:0;';
+          f.addEventListener('load', function () { try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*'); } catch (e) {} });
+          frame.appendChild(f);
+          m.classList.add('is-open');
+          document.body.style.overflow = 'hidden';
+          lastFocus = document.activeElement;
+          var c = m.querySelector('[data-video="close"]'); if (c) c.focus();
+        }
+        function closeVideo() {
+          var m = modal(); if (!m || !m.classList.contains('is-open')) return;
+          var frame = m.querySelector('[data-video="frame"]'); if (frame) frame.innerHTML = '';
+          m.classList.remove('is-open');
+          document.body.style.overflow = '';
+          if (lastFocus && lastFocus.focus) lastFocus.focus();
+        }
+        document.addEventListener('click', function (e) {
+          var t = e.target; if (!t || !t.closest) return;
+          if (t.closest('[data-video-player]')) return;
+          var trig = t.closest('[data-video-src]');
+          if (trig && trig.getAttribute('data-video-mode') === 'inline') return;
+          if (trig) { e.preventDefault(); openVideo(trig.getAttribute('data-video-src')); return; }
+          var m = modal(); if (!m || !m.classList.contains('is-open')) return;
+          if (t.closest('[data-video="close"]')) { e.preventDefault(); closeVideo(); }
+          else if (t === m) closeVideo();
+        });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeVideo(); });
+        window.addEventListener('message', function (e) {
+          if (!e.origin || e.origin.indexOf('youtube') < 0) return;
+          var d = e.data; if (typeof d === 'string') { try { d = JSON.parse(d); } catch (err) { return; } }
+          if (d && d.event === 'onStateChange' && d.info === 0) closeVideo();
+        });
+})();
+
+window.CrownForm = window.CrownForm || { forms: [], type: null };
 
 document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
 
@@ -206,7 +522,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     if (splitHead && splitHead.parentElement) show(splitHead.parentElement, !tooLow);
     if (!SHORT) {
       setHTML('low-text', 'At ' + rate2(rate) + '%, ' + money(M) + ' a month doesn’t cover the ' + money(P * rate / 1200) + ' of interest charged.');
-      setHTML('rate-hint', 'Your numbers point to about ' + rate2(dRate) + '%. Not sure? Leave it there.');
+      setHTML('rate-hint', 'Most variable home loans sit around ' + rate2(dRate) + '% right now. Not sure? Leave it there.');
     }
 
     var typo = inc > RULES.incomeTypoAbove;
@@ -246,24 +562,20 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
       all('[data-bind="years-mismatch"]').forEach(function (el) { show(el, !fits); });
 
       setHTML('build-schedule', 'Building your ' + sim.n + '-repayment schedule');
-      setHTML('build-schedule-chip', sim.n + ' repayments');
-      setHTML('build-split-chip', kay(sim.interest) + ' interest');
-      setHTML('build-tax', 'Applying 2025–26 tax rates to ' + money(inc || 180000));
       setHTML('build-tax-chip', marg + '% marginal');
-      setHTML('build-state', 'Checking what’s possible for ' + stateName() + ' homeowners');
       setHTML('welcome-summary', money(P) + ' · ' + money(M) + '/month · ' + rate2(rate) + '%');
     } else {
       setHTML('daily-title', money(perDay) + ' a day in interest');
       setHTML('daily-text', 'On ' + money(P) + ' at ' + rate2(dRate) + '%. That’s ' + mark('$' + perHour.toFixed(2) + ' an hour') + ', even while you sleep.');
       setHTML('days-title', 'Until ' + dayText);
       setHTML('build-schedule', 'Estimating your schedule at ' + rate2(dRate) + '%');
-      setHTML('build-schedule-chip', sim.n + ' repayments');
-      setHTML('build-split-chip', kay(sim.interest) + ' interest');
-      setHTML('build-tax', 'Applying 2025–26 tax rates to ' + money(inc || 180000));
-      setHTML('build-state', 'Checking what’s possible for ' + stateName() + ' homeowners');
       setHTML('plan-intro', 'Estimated at today’s average rate of ' + rate2(dRate) + '% over ' + planYears() + ' years. How long is left on yours?');
       setHTML('welcome-summary', money(P) + ' · estimated at ' + rate2(dRate) + '% over ' + planYears() + ' yrs');
     }
+    setHTML('build-schedule-chip', sim.n + ' repayments');
+    setHTML('build-split-chip', kay(sim.interest) + ' interest');
+    setHTML('build-tax', 'Applying 2025–26 tax rates to ' + money(inc || 180000));
+    setHTML('build-state', 'Checking what’s possible for ' + stateName() + ' homeowners');
 
     var ratio = inc ? (M * 12) / inc : 0.2433;
     var score = Math.max(0, Math.min(99, Math.round(133.6 - 175 * ratio)));
@@ -301,6 +613,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     if (ORDER.slice(1, TOTAL).indexOf(current) < 0) return;
     try { var o = {}; new FormData(form).forEach(function (v, k) { o[k] = v; }); localStorage.setItem(KEY, JSON.stringify({ step: current, data: o })); } catch (e) {}
   }
+  function clearSaved() { try { localStorage.removeItem(KEY); } catch (e) {} }
   function load() { try { return JSON.parse(localStorage.getItem(KEY)); } catch (e) { return null; } }
 
   function syncScreens() {
@@ -444,7 +757,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     trackOnce(!reason, reason);
     var data = {}; new FormData(form).forEach(function (v, k) { data[k] = v; });
     form.dispatchEvent(new CustomEvent('payoff:submit', { detail: { type: TYPE, qualified: !reason, reason: reason, answers: data, result: last }, bubbles: true }));
-    try { localStorage.removeItem(KEY); } catch (e) {}
+    clearSaved();
     broadcast(reason ? 'notfit' : 'plan', reason);
     if (reason) return notFit(reason);
     goTo(PLAN);
@@ -471,7 +784,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     qa('[type="range"]').forEach(fill);
     restoreChosen(src.data);
     if (all('[data-plan-years]').length) setPlanYears(parseInt(src.data['Plan-Years'], 10) || RULES.shortTermYears);
-    try { localStorage.removeItem(KEY); } catch (e) {}
+    clearSaved();
     history = []; paintValues(); render();
     if (src.kind === 'plan') return goTo(PLAN, false, true);
     notFit(src.reason || 'small-balance');
@@ -525,6 +838,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     function set(n, v) { if (v !== undefined && v !== null && v !== '') hidden(n).value = v; }
     ATTRIB.forEach(function (k) { set(k, urlParams.get(k) || ls(k)); });
     set('Form-Type', TYPE); set('Qualified', qualified ? 'yes' : 'no'); set('Not-A-Fit-Reason', reason);
+    set('Landing-Page', window.location.pathname.replace(/\/+$/, '').split('/').pop());
     set('Repayment-Frequency', freqName()); set('Repayment-Monthly', Math.round(last.M));
     set('Payoff-Months', last.sim ? last.sim.n : ''); set('Total-Interest', last.sim ? Math.round(last.sim.interest) : '');
     set('Debt-Ratio-Score', last.score);
@@ -627,7 +941,7 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     history = []; goTo(sv.step, false);
   }
   function restart() {
-    try { localStorage.removeItem(KEY); } catch (e) {}
+    clearSaved();
     form.reset(); qa('[type="range"]').forEach(fill); if (all('[data-plan-years]').length) setPlanYears(RULES.shortTermYears); history = []; goTo('1', false);
   }
 
@@ -861,18 +1175,18 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     });
   });
 
-  var pChecks = q('[data-panel="checks"]'), pTitle = q('[data-panel="title"]'), pMeter = q('[data-panel="meter"]'), pReady = q('[data-panel="ready"]');
-  var pRows = pChecks ? [].slice.call(pChecks.children) : [];
-  var CHECK_SVG = '<svg viewBox="0 0 16 16" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"></path></svg>';
-  var DOT_SVG = '<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="1.5" fill="currentColor"></circle></svg>';
-  var buildTimer = null, buildDone = false, chipProto = null;
-  pRows.forEach(function (r) { if (!chipProto && r.children[2]) chipProto = r.children[2]; });
-
-  function chipFor(row) {
-    var c = row.children[2];
-    if (!c && chipProto) { c = chipProto.cloneNode(true); c.removeAttribute('data-bind'); row.appendChild(c); }
-    return c;
-  }
+  var buildDone = false;
+  var builder = window.CrownForm.build ? window.CrownForm.build.create({
+    checks: q('[data-panel="checks"]'), title: q('[data-panel="title"]'), meter: q('[data-panel="meter"]'), ready: q('[data-panel="ready"]'),
+    data: function () {
+      var s = last.sim;
+      return { key: s ? s.n : '', chips: s ? [s.n + ' repayments', kay(s.interest) + ' interest', last.marg + '% marginal', 'Score ready', stateName() + ' checked'] : ['', '', '', '', ''] };
+    },
+    pct: function (p) { setHTML('build-pct', String(Math.round(p))); },
+    state: function (done) { buildDone = done; syncButton(); }
+  }) : null;
+  function stopBuild() { if (builder) builder.stop(); }
+  function startBuild() { if (builder) builder.start(); else { buildDone = true; syncButton(); } }
 
   var emailState = { value: '', ok: null };
   function verifyEmail(el, report) {
@@ -915,41 +1229,6 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     var label = buildDone ? 'Show my payoff plan' : 'Building your plan…';
     if (isInput) a.value = label; else if (txt) txt.textContent = label;
   }
-  var paintKey = '';
-  function paintPanel(pct) {
-    var done = Math.floor(pct / 20), s = last.sim;
-    var key = done + '|' + (pct >= 100) + '|' + (s ? s.n : '');
-    if (key !== paintKey) {
-      paintKey = key;
-      var chips = s ? [s.n + ' repayments', kay(s.interest) + ' interest', last.marg + '% marginal', 'Score ready', stateName() + ' checked'] : ['', '', '', '', ''];
-      pRows.forEach(function (row, i) {
-        var state = i < done ? 'done' : (i === done && pct < 100) ? 'active' : 'pending';
-        var tick = row.children[0], text = row.children[1], chip = chipFor(row);
-        tick.className = 'google-lp-form-tick' + (state === 'done' ? ' is-done' : state === 'active' ? ' is-active' : ' is-pending');
-        tick.innerHTML = state === 'done' ? CHECK_SVG : state === 'pending' ? DOT_SVG : '';
-        text.className = 'google-lp-form-check-text' + (state === 'pending' ? ' is-pending' : '');
-        if (chip) { chip.style.display = state === 'done' ? '' : 'none'; if (state === 'done') chip.textContent = chips[i]; }
-      });
-      if (pTitle) pTitle.textContent = pct >= 100 ? 'Your payoff plan is ready' : 'Building your payoff plan…';
-      if (pReady) pReady.style.display = pct >= 100 ? 'flex' : 'none';
-    }
-    setHTML('build-pct', String(Math.round(pct)));
-    if (pMeter) pMeter.style.paddingLeft = pct + '%';
-  }
-  function stopBuild() { if (buildTimer) cancelAnimationFrame(buildTimer); buildTimer = null; }
-  function startBuild() {
-    if (!pChecks) { buildDone = true; syncButton(); return; }
-    stopBuild(); buildDone = false; syncButton(); paintKey = ''; paintPanel(0);
-    var t0 = performance.now(), dur = 4200;
-    function ease(t) { return t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2; }
-    function frame(now) {
-      var t = Math.min(1, (now - t0) / dur), p = t >= 1 ? 100 : ease(t) * 100;
-      paintPanel(p);
-      if (t >= 1) { buildTimer = null; buildDone = true; syncButton(); return; }
-      buildTimer = requestAnimationFrame(frame);
-    }
-    buildTimer = requestAnimationFrame(frame);
-  }
   syncButton();
 
   (function () {
@@ -961,108 +1240,20 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     setTimeout(syncButton, 500);
   })();
 
-  var PC_URL = 'https://flowdojo.github.io/au-postcodes/au-postcodes.json';
   var sInput = q('[data-suggest="input"]');
-  var sList = q('[data-suggest="list"]');
-  var sTpl = q('[data-suggest="template"]');
-  var sChip = q('[data-suggest="chip"]');
-  var sChipText = q('[data-suggest="chip-text"]');
-  var hits = [], active = -1;
-
-  function loadPostcodes() {
-    var cf = window.CrownForm;
-    if (!cf.pcPromise) {
-      cf.pcPromise = fetch(PC_URL).then(function (r) { return r.json(); }).then(function (d) {
-        var rows = [];
-        Object.keys(d).forEach(function (pc) { d[pc].forEach(function (e) { rows.push({ suburb: e[0], state: e[1], pc: pc, lower: e[0].toLowerCase() }); }); });
-        return rows;
-      }).catch(function () { cf.pcPromise = null; return null; });
-    }
-    return cf.pcPromise;
-  }
-  function search(rows, text) {
-    var t = text.trim().toLowerCase(), stF = null, pcF = null, m;
-    if (t.length < 2) return [];
-    if (/^\d{1,4}$/.test(t)) {
-      return rows.filter(function (r) { return r.pc.indexOf(t) === 0; }).slice(0, 8);
-    }
-    m = t.match(/^(.*?)\s+(nsw|vic|qld|sa|wa|tas|nt|act|\d{4})$/);
-    if (m) { t = m[1]; if (/^\d{4}$/.test(m[2])) pcF = m[2]; else stF = m[2].toUpperCase(); }
-    var starts = [], inside = [];
-    rows.forEach(function (r) {
-      if (stF && r.state !== stF) return;
-      if (pcF && r.pc !== pcF) return;
-      var i = r.lower.indexOf(t);
-      if (i === 0) starts.push(r); else if (i > 0) inside.push(r);
+  var sub$ = null;
+  function loadPostcodes() { var s = window.CrownForm.suburb; return s ? s.load() : Promise.resolve(null); }
+  function search(rows, text) { var s = window.CrownForm.suburb; return s ? s.search(rows, text) : []; }
+  function choose(h) { if (sub$) sub$.choose(h); }
+  function restoreChosen(data) { if (sub$) sub$.restore(data); }
+  if (window.CrownForm.suburb && sInput) {
+    sub$ = window.CrownForm.suburb.attach({
+      input: sInput, list: q('[data-suggest="list"]'), tpl: q('[data-suggest="template"]'),
+      chip: q('[data-suggest="chip"]'), chipText: q('[data-suggest="chip-text"]'),
+      hidden: hidden,
+      pick: function (h, quiet) { chosen = h; if (!quiet) { render(); save(); } },
+      clear: function () { clearErr(sInput); }
     });
-    function by(a, b) { return a.lower < b.lower ? -1 : a.lower > b.lower ? 1 : (a.state + a.pc) < (b.state + b.pc) ? -1 : 1; }
-    starts.sort(by); inside.sort(by);
-    return starts.concat(inside).slice(0, 8);
-  }
-  function hidden(name) {
-    var h = field(name);
-    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = name; form.appendChild(h); }
-    return h;
-  }
-  function setChip(h) {
-    if (!sChip) return;
-    if (h) { if (sChipText) sChipText.textContent = h.state + ' ' + h.pc; sChip.style.display = ''; }
-    else sChip.style.display = 'none';
-  }
-  function choose(h) {
-    chosen = h;
-    if (sInput) sInput.value = h ? h.suburb : '';
-    hidden('Suburb-State').value = h ? h.state : '';
-    hidden('Suburb-Postcode').value = h ? h.pc : '';
-    setChip(h); closeList(); render(); save();
-  }
-  function closeList() { hits = []; active = -1; if (sList) sList.style.display = 'none'; }
-  function paintActive() {
-    qa('[data-suggest="row"]', sList).forEach(function (el, i) { el.style.backgroundColor = i === active ? '#f7f1fc' : ''; });
-  }
-  function openList(rows) {
-    if (!sList || !sTpl) return;
-    qa('[data-suggest="row"]', sList).forEach(function (el) { el.parentNode.removeChild(el); });
-    hits = rows; active = -1;
-    if (!rows.length) { sList.style.display = 'none'; return; }
-    sTpl.style.display = 'none';
-    rows.forEach(function (h, i) {
-      var el = sTpl.cloneNode(true);
-      el.setAttribute('data-suggest', 'row'); el.style.display = '';
-      el.children[0].textContent = h.suburb; el.children[1].textContent = h.state + ' ' + h.pc;
-      el.addEventListener('mousedown', function (e) { e.preventDefault(); choose(h); });
-      el.addEventListener('mouseenter', function () { active = i; paintActive(); });
-      sList.appendChild(el);
-    });
-    sList.style.display = 'block';
-  }
-  function restoreChosen(data) {
-    if (!sInput || !data || !data['Suburb-State']) return;
-    chosen = { suburb: sInput.value, state: data['Suburb-State'], pc: data['Suburb-Postcode'] };
-    setChip(chosen);
-  }
-  if (sInput && sList) {
-    if (sTpl) sTpl.style.display = 'none';
-    setChip(null); closeList();
-    sInput.addEventListener('focus', function () { loadPostcodes(); });
-    sInput.addEventListener('input', function () {
-      chosen = null; setChip(null); clearErr(sInput);
-      hidden('Suburb-State').value = ''; hidden('Suburb-Postcode').value = '';
-      var text = sInput.value;
-      loadPostcodes().then(function (rows) {
-        if (!rows || sInput.value !== text) return;
-        var found = search(rows, text);
-        if (found.length === 1 && found[0].lower === text.trim().toLowerCase()) choose(found[0]); else openList(found);
-      });
-    });
-    sInput.addEventListener('keydown', function (e) {
-      if (!hits.length) return;
-      if (e.key === 'ArrowDown') { e.preventDefault(); active = (active + 1) % hits.length; paintActive(); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); active = (active - 1 + hits.length) % hits.length; paintActive(); }
-      else if (e.key === 'Enter' && active > -1) { e.preventDefault(); choose(hits[active]); }
-      else if (e.key === 'Escape') closeList();
-    });
-    sInput.addEventListener('blur', function () { setTimeout(closeList, 150); });
   }
 
   var saved = load();
@@ -1073,23 +1264,4 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
   else goTo('1', false, true);
 });
 
-if (!window.CrownForm.type) window.CrownForm.show('long');
-
-if (!window.CrownForm.heroBound) {
-  window.CrownForm.heroBound = true;
-  document.addEventListener('click', function (e) {
-    var a = e.target.closest && e.target.closest('a[href="#open-form"]');
-    if (!a) return;
-    e.preventDefault();
-    var wrap = document.querySelector('[data-form-wrapper="hero"]');
-    if (!wrap) return;
-    var media = document.querySelector('[data-hero="media"]');
-    var cta = document.querySelector('[data-hero="cta"]');
-    var after = document.querySelector('[data-hero="after"]');
-    if (media) media.classList.add('hide');
-    if (cta) cta.classList.add('hide');
-    if (after) after.classList.remove('hide');
-    wrap.classList.add('is-active');
-    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  });
-}
+if (!window.CrownForm.type && window.CrownForm.show) window.CrownForm.show('long');
