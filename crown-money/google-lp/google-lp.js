@@ -256,6 +256,14 @@ if (!window.CrownForm.heroBound) {
   });
 })();
 
+(function () {
+  if (document.getElementById('google-lp-extra-css')) return;
+  var s = document.createElement('style');
+  s.id = 'google-lp-extra-css';
+  s.textContent = '@keyframes google-lp-reviews-scroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}.google-lp-reviews-track{animation:google-lp-reviews-scroll 60s linear infinite;will-change:transform}.google-lp-reviews-viewport:hover .google-lp-reviews-track{animation-play-state:paused}@media (prefers-reduced-motion:reduce){.google-lp-reviews-track{animation:none}}';
+  document.head.appendChild(s);
+})();
+
 window.CrownForm = window.CrownForm || { forms: [], type: null };
 
 document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
@@ -1167,6 +1175,11 @@ document.querySelectorAll('[data-form="root"]').forEach(function (form, index) {
     setTimeout(syncButton, 500);
   })();
 
+  function hidden(name) {
+    var h = field(name);
+    if (!h) { h = document.createElement('input'); h.type = 'hidden'; h.name = name; form.appendChild(h); }
+    return h;
+  }
   var sInput = q('[data-suggest="input"]');
   var sub$ = null;
   function loadPostcodes() { var s = window.CrownForm.suburb; return s ? s.load() : Promise.resolve(null); }
